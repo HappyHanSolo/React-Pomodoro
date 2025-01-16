@@ -5,7 +5,7 @@ import React, {useState} from 'react';
 
 function App() {
   let buttonCSS="py-2 px-3 m-1 rounded-md text-white border-2";
-  const [timer, setTimer] = useState("00:05");
+  const [timer, setTimer] = useState("00:02");
   const [reset, setNewTimer] = useState("")
   const [SSButton, setSSButton] = useState(true)
   let startStopButton = (SSButton === true) ? "Start" : "Pause" 
@@ -15,14 +15,11 @@ function App() {
     let minute = Number.parseInt(timer.slice(0,colon));
     let seconds = Number.parseInt(timer.slice(colon+1));
     let countdown = (minute*60 + seconds)
-    timerRun(countdown)
-    if (countdown===0){
-      clearInterval(timerRun)
-      setSSButton(SSButton =>!SSButton)
-    }
-    
+    timerRun(countdown) 
   }
-  function timerRun(countdown){setInterval(() => {
+
+  function timerRun(countdown){
+    const timerID = setInterval(() => {
     let convertedTimeMinutes = Math.floor(countdown/60);
     let displayTimeMinutes = convertedTimeMinutes.toLocaleString('en-US',{
       minimumIntegerDigits:2,
@@ -33,12 +30,15 @@ function App() {
     })
     let displayTime = `${displayTimeMinutes}:${displayTimeSeconds}`
     setTimer(displayTime)
-    countdown--
     if (countdown===0){
-      clearInterval(timerRun)
+      console.log("ran", countdown)
+      clearInterval(timerID)
       setSSButton(SSButton =>!SSButton)
-    }
+    }  
+    countdown--
   }, 1000);}
+
+
 
   function setTimeValues(value){
     setNewTimer(value)
