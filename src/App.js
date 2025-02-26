@@ -1,7 +1,7 @@
 import './App.css';
-import soundfile from './audio/valorantAssets/valorant-champions-2024-kill-1.mp3'
-import React, {useState} from 'react';
-
+// import soundfile from './audio/valorantAssets/valorant-theme-song.mp3'
+import React, {useEffect, useState} from 'react';
+import Soundclips from './SoundsClipList';
 
 function App() {
   let buttonCSS="py-2 px-3 m-1 rounded-md text-white border-2";
@@ -14,9 +14,10 @@ function App() {
   const [SSButton, setSSButton] = useState(true)
   const [timerBGColor, setTimerBGColor] = useState(defaultCSS)
   let startStopButton = (SSButton === true) ? "Start" : "Pause" 
- 
-  function play(){
-    new Audio(soundfile).play()
+
+
+  function play(sound){
+    new Audio(sound).play()
   }
 
   function startTimer (timer){
@@ -67,20 +68,22 @@ function App() {
   return (
     <div className="bg-black w-screen h-screen flex">
       <section className={timerBGColor}>
-          <div>
+          {/* <div>
             <button onClick={()=>{changeTimeButton("10:00", pomodoroCSS)}} className={buttonCSS}>Pomodoro</button>
             <button onClick={()=>{changeTimeButton("05:00", shortBreakCSS)}} className={buttonCSS}>Short Break</button>
             <button onClick={()=>{changeTimeButton("03:00", longBreakCSS)}}className={buttonCSS}>Long Break</button>
           </div>
           <h1 className="text-9xl font-bold text-white m-2">{timer}</h1>
-          <audio autoPlay src={soundfile}/>
           <div>
             <button onClick={()=>{setSSButton(SSButton =>!SSButton); startTimer(timer)}} className={buttonCSS}>{startStopButton}</button>
             <button onClick={()=>{resetButton()}}className={buttonCSS}>Reset</button>
-          </div>
+          </div> */}
+          <Soundclips/>
         </section>
      </div>
   );
 }
 
 export default App;
+
+
