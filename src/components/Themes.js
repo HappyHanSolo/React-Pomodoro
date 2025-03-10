@@ -35,45 +35,46 @@ import StarcraftZergIcon from '../assests/starcraftAssets/zerg/ZergIcon.png'
 
 import Button from './Button'
 
-
-function SoundClipList(){
+function SoundClipList({sPlaylist, setSPlaylist}){
     let themes =   
         {
             "Animal Crossing":{
                 "Logo":AnimalCrossingIcon,
+                "Audio":" ",
             },
-            "Halo":{
-                "Logo":HaloIcon,
-            },
-            "League of Legends":{
-                "Logo":LeagueOfLegendsIcon,
-            },
-            "Nintendo":{
-                "Logo":NintendoIcon,
-            },
-            "Pikmin":{
-                "Logo":PikminIcon,
-            },
-            "Pokemon":{
-                "Logo":PokemonIcon,
-            },
-            "Squid Games":{
-                "Logo":SquidGameIcon,
-            },
-            'Starcraft':{
-                "Logo":StarCraftIcon,
-                "Protoss":{
-                    "Logo":StarcraftProtossIcon,
-                },
-                "Terran":{
-                    "Logo":StarcraftTerranIcon,
-                },
-                "Zerg":{
-                    "Logo":StarcraftZergIcon,
-                },
-            },
+            // "Halo":{
+            //     "Logo":HaloIcon,
+            // },
+            // "League of Legends":{
+            //     "Logo":LeagueOfLegendsIcon,
+            // },
+            // "Nintendo":{
+            //     "Logo":NintendoIcon,
+            // },
+            // "Pikmin":{
+            //     "Logo":PikminIcon,
+            // },
+            // "Pokemon":{
+            //     "Logo":PokemonIcon,
+            // },
+            // "Squid Games":{
+            //     "Logo":SquidGameIcon,
+            // },
+            // 'Starcraft':{
+            //     "Logo":StarCraftIcon,
+            //     "Protoss":{
+            //         "Logo":StarcraftProtossIcon,
+            //     },
+            //     "Terran":{
+            //         "Logo":StarcraftTerranIcon,
+            //     },
+            //     "Zerg":{
+            //         "Logo":StarcraftZergIcon,
+            //     },
+            // },
             "Valorant":{
                 "Logo": ValorantIcon,
+                "Audio":{
                 "Start":{
                     "Chamber-Oh-No": ChamberOhNo,
                     "ChamberPlay": ChamberPlay,
@@ -93,40 +94,47 @@ function SoundClipList(){
                     "PheonixForever": PheonixForever,
                     "OmenBoo": OmenBoo
                 }
-
+            }
             },
         };
-
-        let themesrc = themes["Pokemon"]["Logo"]
-        let themesrc2 = themes["Squid Games"]["Logo"]
-        let themesrc3 = themes["Starcraft"]["Terran"]["Logo"]
-        let testtheme = <img className='bg-black w-20' src={themesrc} />;
-        let testtheme2 = <img className='bg-black w-20' src={themesrc2} />;
-        let testtheme3 = <img className='bg-black w-20' src={themesrc3} />;
         
-        
-
-
+        function updatePlaylist(themeAudio){
+            let newPlaylist=[]
+            let finishlist = themeAudio["Pomodoro Finish"]["Reaver"]
+            for (let s=0;s<finishlist.length;s++){
+                newPlaylist.push(finishlist[s])
+            }
+            setSPlaylist(newPlaylist)
+        }
 
         function listThemes(){
             let themekeys = Object.keys(themes)
-            
-            console.log(Object.keys(themes))
-            
+            let themeHTMLList=[]
+            for (let t=0; t<themekeys.length; t++){
+                let themeLogo=themes[themekeys[t]]["Logo"]
+                let themeAudio=themes[themekeys[t]]["Audio"]
+                let buttonCSS = 'h-20 my-[4px] border-4 border-red-400'
+                themeHTMLList.push(
+                    <Button 
+                        buttonCSS={buttonCSS} 
+                        onClick={()=>{updatePlaylist(themeAudio)}}
+                        innerButtonText={<img className='bg-black w-20 object-cover' src={themeLogo}></img>} 
+                    />)
+            }
+                        
             return(
-                <div>
-
+                <div className="flex flex-col">
+                    {themeHTMLList}
                 </div>
-                    
+                  
             )
         }
-        let themeHTML = listThemes()
-        
+        let listofThemes = listThemes()
+
 
     return(
        <div>
-        ${themeHTML}
-
+        {listofThemes}
        </div>
     )
 }
