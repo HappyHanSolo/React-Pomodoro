@@ -118,6 +118,7 @@ function SoundClipList({sPlaylist, setSPlaylist}){
                     <Button 
                         buttonCSS={buttonCSS} 
                         onClick={()=>{updatePlaylist(themeAudio)}}
+                        key={t}
                         innerButtonText={<img className='bg-black w-20 object-cover' src={themeLogo}></img>} 
                     />)
             }
