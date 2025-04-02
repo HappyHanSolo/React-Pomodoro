@@ -13,7 +13,8 @@ function App() {
   const [sTime, setSTime] = useState("05:00")
   const [lTime, setLTime] = useState("15:00")
   const [reset, setNewTimer] = useState(pTime)
-  const [timer, setTimer] = useState(pTime);
+  const [timer, setTimer] = useState(pTime)
+  const [interval, setInterval]= useState(4)
   const [sPlaylist, setSPlaylist] = useState([])
   const [pFPlaylist, setPFPlaylist]= useState([])
   const [bSPlaylist, setBSPlaylist]= useState([])
@@ -36,8 +37,9 @@ function App() {
           <TimerButton startStopButton={startStopButton} setSSButton={setSSButton} SSButton={SSButton} setTimer={setTimer} reset={reset} setNewTimer={setNewTimer} timer={timer} sPlaylist={sPlaylist}/>
         </section>
         <section>
-          <Settings pTime={pTime} sTime={sTime} lTime={lTime} setPTime={setPTime} setSTime={setSTime} setLTime={setLTime}/>
+          <Settings pTime={pTime} sTime={sTime} lTime={lTime} setPTime={setPTime} setSTime={setSTime} setLTime={setLTime} timer={timer} setTimer={setTimer} interval={interval} setInterval={setInterval}/>
         </section>
+        
      </div>
   );
 
