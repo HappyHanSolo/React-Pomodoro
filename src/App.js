@@ -82,9 +82,9 @@ export default function App() {
   const phaseRef = useRef(phase);
   useEffect(() => { phaseRef.current = phase; }, [phase]);
 
-  useEffect(() => { if (!isRunning && phaseRef.current === PHASES.POMODORO)    { setTimer(pTime); setReset(pTime); } }, [pTime]);
-  useEffect(() => { if (!isRunning && phaseRef.current === PHASES.SHORT_BREAK) { setTimer(sTime); setReset(sTime); } }, [sTime]);
-  useEffect(() => { if (!isRunning && phaseRef.current === PHASES.LONG_BREAK)  { setTimer(lTime); setReset(lTime); } }, [lTime]);
+  useEffect(() => { if (!isRunning && phaseRef.current === PHASES.POMODORO)    { setTimer(pTime); setReset(pTime); } }, [pTime, isRunning]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (!isRunning && phaseRef.current === PHASES.SHORT_BREAK) { setTimer(sTime); setReset(sTime); } }, [sTime, isRunning]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (!isRunning && phaseRef.current === PHASES.LONG_BREAK)  { setTimer(lTime); setReset(lTime); } }, [lTime, isRunning]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Finish callbacks — only responsible for side effects in App ─────────
   // TimerButton handles auto-start directly; these just update App state.

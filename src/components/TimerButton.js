@@ -49,8 +49,11 @@ function playInstantWithWildcard(src, stageKey, sm, instantRef) {
   const pool = sm?.__wildcard;
   const hasWildcard = wildcardEligible && pool?.length > 0;
 
-  // Random threshold re-rolled fresh each time (0–100%)
-  const wildcardFires = hasWildcard && Math.random() < Math.random();
+  // Fully random chance: threshold is itself random (0–1), then we roll against it.
+  // Two separate named variables avoids the no-self-compare lint rule.
+  const wildcardThreshold = Math.random();
+  const wildcardRoll = Math.random();
+  const wildcardFires = hasWildcard && wildcardRoll < wildcardThreshold;
 
   const actualSrc = wildcardFires
     ? pool[Math.floor(Math.random() * pool.length)]
