@@ -10,6 +10,7 @@
  */
 
 import { useState, useRef, useEffect } from "react";
+import { ASSET_THEMES, getManifestFileMap, getManifestFiles, getManifestThemeNames } from "../audioManifest";
 
 // ─── Stage definitions ────────────────────────────────────────────────────
 export const STAGES = [
@@ -332,6 +333,34 @@ function ThemeEditorModal({ theme, parentTheme, onSave, onActivate, onDelete, on
   function updateWildcard(clips){ setDraft(p=>({...p,wildcardClips:clips})); }
   function toggleWildcardInherit(){ setDraft(p=>({...p,wildcardInherit:!p.wildcardInherit})); }
 
+  // ── Load from manifest ────────────────────────────────────────────────────
+  const [manifestLoaded, setManifestLoaded] = useState(false);
+  function loadFromManifest() {
+    const names = getManifestThemeNames();
+    const match = names.find(n => n === draft.name)
+      || names.find(n => n.toLowerCase() === draft.name.toLowerCase())
+      || names.find(n => draft.name.toLowerCase().includes(n.toLowerCase()) || n.toLowerCase().includes(draft.name.toLowerCase()));
+
+    if (!match) {
+      alert(`No bundled audio found for theme "${draft.name}".\n\nAvailable manifest themes:\n${names.join(", ") || "(none — run generateManifest.js first)"}\n\nMake sure your folder name in src/assests/ matches your theme name, then run generateManifest.js and redeploy.`);
+      return;
+    }
+    const files = ASSET_THEMES[match] || [];
+    if (!files.length) { alert(`Manifest folder "${match}" is empty.`); return; }
+
+    const allAssigned = new Set([
+      ...Object.values(draft.stageMap||{}).flatMap(e=>(e.clips||[]).map(c=>c.name)),
+      ...(draft.wildcardClips||[]).map(c=>c.name),
+    ]);
+    const toAdd = files
+      .filter(f => !allAssigned.has(f.name))
+      .map(f => ({ id: uid(), name: f.name, url: f.url, enabled: true }));
+
+    if (!toAdd.length) { alert(`All files from "${match}" are already assigned to stages.`); return; }
+    setUnsorted(p => [...p, ...toAdd]);
+    setManifestLoaded(true);
+  }
+
   // Folder dump → unsorted inbox
   async function handleFolderDump(e){
     const added=await filesToClips(e.target.files);
@@ -416,7 +445,12 @@ function ThemeEditorModal({ theme, parentTheme, onSave, onActivate, onDelete, on
                 <div style={{fontSize:10,color:C.muted}}>Double-click name · click icon to change</div>
               </div>
             </div>
-            <div style={{display:"flex",gap:8,alignItems:"center"}}>
+            <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+              <button onClick={loadFromManifest}
+                style={{...SB,borderColor:manifestLoaded?"#22c55e":C.accent,color:manifestLoaded?"#22c55e":C.accent,display:"flex",alignItems:"center",gap:4}}
+                title={`Load bundled audio files for "${draft.name}" into the unsorted inbox`}>
+                {manifestLoaded ? "✓ Loaded" : "⬇ Load from manifest"}
+              </button>
               <button onClick={()=>folderRef.current?.click()}
                 style={{...SB,borderColor:C.amber,color:C.amber,display:"flex",alignItems:"center",gap:4}}
                 title="Upload an entire folder — clips land in the Unsorted inbox">
@@ -902,6 +936,46 @@ export default function Themes({ setSoundMap }) {
   const audioRef = useRef(null);
 
   useEffect(()=>{ lsSet(LS_KEY,themes); },[themes]);
+
+  // ── Auto-relink audio from manifest on startup ───────────────────────────
+  // For any theme/sub-theme whose name matches a folder in the manifest,
+  // fill in missing .url fields automatically. This means audio bundled
+  // in src/assests/ is always available without any manual upload step.
+  useEffect(() => {
+    const manifestNames = getManifestThemeNames();
+    if (!manifestNames.length) return;
+
+    let changed = false;
+
+    function relinkClip(clip) {
+      if (clip.url) return clip; // already has audio
+      // Try each manifest theme to find a file matching this clip name
+      for (const themeName of manifestNames) {
+        const fileMap = getManifestFileMap(themeName);
+        const url = fileMap[clip.name] || fileMap[clip.name.toLowerCase()];
+        if (url) { changed = true; return { ...clip, url }; }
+      }
+      return clip;
+    }
+
+    function relinkTheme(t) {
+      const sm = {};
+      for (const [k, v] of Object.entries(t.stageMap || {})) {
+        sm[k] = { ...v, clips: (v.clips || []).map(relinkClip) };
+      }
+      return {
+        ...t,
+        stageMap: sm,
+        wildcardClips: (t.wildcardClips || []).map(relinkClip),
+        subThemes: (t.subThemes || []).map(relinkTheme),
+      };
+    }
+
+    const relinked = themes.map(relinkTheme);
+    if (changed) {
+      setThemes(relinked);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   function stopAudio(){ try{audioRef.current?.pause();audioRef.current=null;}catch{} }
 
