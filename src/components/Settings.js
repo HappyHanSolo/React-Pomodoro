@@ -284,7 +284,6 @@ export default function Settings({
         return;
       }
 
-      const {total} = countLinked(payload.themes);
       const themeCount = payload.themes.length;
       const subCount = payload.themes.reduce((n,t)=>(t.subThemes||[]).length+n, 0);
       setImportMsg(
