@@ -290,9 +290,11 @@ export default function Settings({
       setImportMsg(
         `✅ Imported ${themeCount} theme${themeCount!==1?"s":""}` +
         (subCount ? ` (+ ${subCount} sub-theme${subCount!==1?"s":""})` : "") +
-        `. ${total > 0 ? `${total} audio clip slot${total!==1?"s":""} need re-linking — upload your audio folder below.` : "No audio clips to re-link."}`
+        `. Reload the page to see your themes.`
       );
       setRelinkStatus(null);
+      // Auto-reload after 1.5s so themes appear — localStorage is written, just need a fresh mount
+      setTimeout(() => window.location.reload(), 1500);
     };
     reader.onerror = () => {
       setImportMsg("❌ Failed to read the file. Check that it isn't corrupted and try again.");
