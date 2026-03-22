@@ -59,7 +59,13 @@ function normaliseTheme(theme) {
   const sm = theme.stageMap || {};
   const fullSm = Object.fromEntries(STAGES.map(s => [s.key, sm[s.key] ?? emptyEntry()]));
   const normSubs = (theme.subThemes || []).map(normaliseTheme);
-  return { ...theme, stageMap: fullSm, subThemes: normSubs, wildcardClips: theme.wildcardClips || [] };
+  return {
+    ...theme,
+    stageMap: fullSm,
+    subThemes: normSubs,
+    wildcardClips: theme.wildcardClips || [],
+    wildcardInherit: theme.wildcardInherit ?? false,
+  };
 }
 
 const loadThemes = () => (lsGet(LS_KEY, []) || []).map(normaliseTheme);
@@ -204,34 +210,52 @@ function StageRow({ stage, entry, onUpdate, parentEntry, audioRef }) {
 }
 
 // ─── Wildcard section ─────────────────────────────────────────────────────
-function WildcardSection({ clips, onUpdate, audioRef }) {
+function WildcardSection({ clips, onUpdate, audioRef, parentClips, inherit, onToggleInherit }) {
   const fileRef=useRef(null),folderRef=useRef(null);
+  const hasParent = parentClips && parentClips.length > 0;
+  const effectiveClips = inherit && hasParent ? parentClips : clips;
+
   async function addFiles(files){ const added=await filesToClips(files);if(added.length)onUpdate([...clips,...added]); }
-  function onDrop(e){ e.preventDefault();const raw=e.dataTransfer.getData("application/x-pomo-clip");if(!raw)return;try{const c=JSON.parse(raw);onUpdate([...clips,{...c,id:uid()}]);}catch{} }
+  function onDrop(e){
+    e.preventDefault();
+    if (inherit) return; // don't accept drops while inheriting
+    const raw=e.dataTransfer.getData("application/x-pomo-clip");
+    if(!raw)return;
+    try{const c=JSON.parse(raw);onUpdate([...clips,{...c,id:uid()}]);}catch{}
+  }
   return (
     <div onDragOver={e=>e.preventDefault()} onDrop={onDrop}
-      style={{background:`${C.purple}11`,border:`1px solid ${C.purple}44`,borderRadius:12,padding:"14px 16px",marginBottom:14}}>
+      style={{background:`${C.purple}11`,border:`1px solid ${C.purple}${inherit?"88":"44"}`,borderRadius:12,padding:"14px 16px",marginBottom:14,opacity:inherit?0.85:1}}>
       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10,flexWrap:"wrap"}}>
         <span style={{fontSize:16}}>🎲</span>
         <div style={{flex:1}}>
           <div style={{fontSize:13,fontWeight:700,color:C.purple}}>Wildcard Sounds</div>
-          <div style={{fontSize:10,color:C.muted,marginTop:2}}>25% random chance — fires at a random stage event. Both moment and clip are chosen by chance.</div>
+          <div style={{fontSize:10,color:C.muted,marginTop:2}}>Random chance — fires at a random stage event.</div>
         </div>
-        <button onClick={()=>fileRef.current?.click()} style={{...SB,borderColor:C.purple,color:C.purple}}>+ Files</button>
+        {/* Inherit toggle — only shown when a parent with wildcard clips exists */}
+        {onToggleInherit && hasParent && (
+          <Toggle label="Use parent" active={inherit} color={C.accent} onToggle={onToggleInherit}/>
+        )}
+        {!inherit && <><button onClick={()=>fileRef.current?.click()} style={{...SB,borderColor:C.purple,color:C.purple}}>+ Files</button>
         <button onClick={()=>folderRef.current?.click()} style={{...SB,borderColor:C.purple,color:C.purple}}>📁 Folder</button>
         <input ref={fileRef} type="file" accept="audio/*" multiple style={{display:"none"}} onChange={e=>{addFiles(e.target.files);e.target.value="";}}/>
-        <input ref={folderRef} type="file" accept="audio/*" multiple webkitdirectory="true" style={{display:"none"}} onChange={e=>{addFiles(e.target.files);e.target.value="";}}/>
+        <input ref={folderRef} type="file" accept="audio/*" multiple webkitdirectory="true" style={{display:"none"}} onChange={e=>{addFiles(e.target.files);e.target.value="";}} /></>}
       </div>
-      {clips.length===0?<p style={{fontSize:11,color:"#444",fontStyle:"italic"}}>Drop clips here or click + Files</p>
-        :<div style={{display:"flex",flexDirection:"column",gap:3}}>
-          {clips.map((c,i)=>(
-            <ClipRow key={c.id} clip={c} index={i} draggable={false}
-              onRemove={()=>onUpdate(clips.filter(x=>x.id!==c.id))}
-              onToggle={()=>onUpdate(clips.map(x=>x.id===c.id?{...x,enabled:x.enabled===false}:x))}
-              onRename={n=>onUpdate(clips.map(x=>x.id===c.id?{...x,name:n}:x))}
-              audioRef={audioRef}/>
-          ))}
-        </div>}
+      {inherit && hasParent && (
+        <p style={{fontSize:11,color:C.accent,fontStyle:"italic",marginBottom:4}}>↑ Inheriting {parentClips.length} wildcard clip{parentClips.length!==1?"s":""} from parent</p>
+      )}
+      {!inherit && (effectiveClips.length===0
+        ? <p style={{fontSize:11,color:"#444",fontStyle:"italic"}}>Drop clips here or click + Files</p>
+        : <div style={{display:"flex",flexDirection:"column",gap:3}}>
+            {effectiveClips.map((c,i)=>(
+              <ClipRow key={c.id} clip={c} index={i} draggable={false}
+                onRemove={()=>onUpdate(clips.filter(x=>x.id!==c.id))}
+                onToggle={()=>onUpdate(clips.map(x=>x.id===c.id?{...x,enabled:x.enabled===false}:x))}
+                onRename={n=>onUpdate(clips.map(x=>x.id===c.id?{...x,name:n}:x))}
+                audioRef={audioRef}/>
+            ))}
+          </div>
+      )}
     </div>
   );
 }
@@ -274,6 +298,21 @@ function UnsortedInbox({ clips, onAssign, onRemove, onClear, audioRef }) {
 }
 
 // ─── THEME EDITOR MODAL ───────────────────────────────────────────────────
+// Read-only clip row shown in the parent reference panel.
+// Draggable so clips can be dropped into the sub's stage rows.
+function ParentClipRow({ clip, audioRef }) {
+  function preview(){ try{audioRef.current?.pause();}catch{} const a=new Audio(clip.url);audioRef.current=a;a.play().catch(()=>{}); }
+  return (
+    <div draggable
+      onDragStart={e=>e.dataTransfer.setData("application/x-pomo-clip",JSON.stringify(clip))}
+      style={{display:"flex",alignItems:"center",gap:6,padding:"4px 8px",background:C.card,borderRadius:6,marginBottom:3,fontSize:11,cursor:"grab",userSelect:"none",border:`1px solid ${C.border}`}}>
+      <span style={{fontSize:10,color:"#444",flexShrink:0}}>⠿</span>
+      <button onClick={preview} style={{background:"none",border:"none",cursor:"pointer",fontSize:11,color:C.muted,padding:"0 2px",flexShrink:0}}>▶</button>
+      <span style={{flex:1,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{clip.name}</span>
+    </div>
+  );
+}
+
 function ThemeEditorModal({ theme, parentTheme, onSave, onActivate, onDelete, onClose }) {
   // Normalise on init and strip subThemes — the editor only manages sounds/name/icon,
   // not sub-themes. Keeping subThemes out of the draft prevents saving from overwriting
@@ -291,6 +330,7 @@ function ThemeEditorModal({ theme, parentTheme, onSave, onActivate, onDelete, on
 
   function updateStage(key,entry){ setDraft(p=>({...p,stageMap:{...p.stageMap,[key]:entry}})); }
   function updateWildcard(clips){ setDraft(p=>({...p,wildcardClips:clips})); }
+  function toggleWildcardInherit(){ setDraft(p=>({...p,wildcardInherit:!p.wildcardInherit})); }
 
   // Folder dump → unsorted inbox
   async function handleFolderDump(e){
@@ -314,54 +354,102 @@ function ThemeEditorModal({ theme, parentTheme, onSave, onActivate, onDelete, on
   // Accept drag-drops from unsorted into stage rows
   // (StageRow handles its own drops via application/x-pomo-clip)
 
+  // Modal is wider + side-by-side when editing a sub (parentTheme is set)
+  const hasSplit = !!parentTheme;
+
   return (
     <div style={OV} onClick={e=>e.target===e.currentTarget&&onClose()}>
-      <div style={{...MB,width:"min(620px,96vw)"}}>
-        {/* Header */}
-        <div style={HDR}>
-          <div style={{display:"flex",alignItems:"center",gap:10}}>
-            <UploadIconBox icon={draft.icon} size={40} onUpload={url=>setDraft(p=>({...p,icon:url}))} active={false}/>
-            <div>
-              <InlineEdit value={draft.name} onSave={n=>setDraft(p=>({...p,name:n}))} style={{fontSize:15,fontWeight:800,color:C.text}}/>
-              <div style={{fontSize:10,color:C.muted}}>Double-click name · click icon to change</div>
+      <div style={{...MB, width: hasSplit ? "min(960px,96vw)" : "min(620px,96vw)", flexDirection:"row", maxHeight:"90vh"}}>
+
+        {/* ── LEFT: parent reference panel (sub-theme editor only) ──────── */}
+        {hasSplit&&(
+          <div style={{width:270,flexShrink:0,borderRight:`1px solid ${C.border}`,display:"flex",flexDirection:"column",background:C.bg}}>
+            <div style={{padding:"12px 14px",borderBottom:`1px solid ${C.border}`,flexShrink:0}}>
+              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:2}}>
+                <IconBox icon={parentTheme.icon} size={28} active={false}/>
+                <div>
+                  <div style={{fontSize:12,fontWeight:700,color:C.text}}>{parentTheme.name}</div>
+                  <div style={{fontSize:10,color:C.muted}}>Parent · drag clips into sub →</div>
+                </div>
+              </div>
+            </div>
+            <div style={{overflowY:"auto",flex:1,padding:"10px 12px"}}>
+              {/* Parent wildcard */}
+              {(parentTheme.wildcardClips||[]).length>0&&(
+                <div style={{marginBottom:10}}>
+                  <div style={{fontSize:10,fontWeight:700,color:C.purple,marginBottom:4,textTransform:"uppercase",letterSpacing:.5}}>🎲 Wildcard</div>
+                  {parentTheme.wildcardClips.map(c=>(
+                    <ParentClipRow key={c.id} clip={c} audioRef={audioRef}/>
+                  ))}
+                </div>
+              )}
+              {/* Parent stages */}
+              {STAGES.map(stage=>{
+                const clips=(parentTheme.stageMap?.[stage.key]?.clips||[]);
+                if(!clips.length) return null;
+                return (
+                  <div key={stage.key} style={{marginBottom:10}}>
+                    <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:4,textTransform:"uppercase",letterSpacing:.5}}>
+                      {stage.emoji} {stage.label}
+                    </div>
+                    {clips.map(c=>(
+                      <ParentClipRow key={c.id} clip={c} audioRef={audioRef}/>
+                    ))}
+                  </div>
+                );
+              })}
+              {/* Empty state */}
+              {!(parentTheme.wildcardClips||[]).length&&STAGES.every(s=>!(parentTheme.stageMap?.[s.key]?.clips||[]).length)&&(
+                <p style={{fontSize:11,color:C.muted,fontStyle:"italic"}}>Parent has no sounds yet.</p>
+              )}
             </div>
           </div>
-          <div style={{display:"flex",gap:8,alignItems:"center"}}>
-            {/* Top-level folder dump button */}
-            <button onClick={()=>folderRef.current?.click()}
-              style={{...SB,borderColor:C.amber,color:C.amber,display:"flex",alignItems:"center",gap:4}}
-              title="Upload an entire folder — clips land in the Unsorted inbox">
-              📁 Dump folder
-            </button>
-            <input ref={folderRef} type="file" accept="audio/*" multiple webkitdirectory="true" style={{display:"none"}} onChange={handleFolderDump}/>
-            {/* Delete this theme */}
-            {onDelete&&(
-              <button onClick={()=>{ if(window.confirm(`Delete theme "${draft.name}"?`))onDelete(); }}
-                style={{...SB,borderColor:C.red,color:C.red}}>🗑 Delete</button>
-            )}
-            <button onClick={onClose} style={{background:"none",border:"none",color:C.muted,fontSize:20,cursor:"pointer"}}>✕</button>
+        )}
+
+        {/* ── RIGHT: editable panel ─────────────────────────────────────── */}
+        <div style={{display:"flex",flexDirection:"column",flex:1,minWidth:0}}>
+          <div style={HDR}>
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <UploadIconBox icon={draft.icon} size={40} onUpload={url=>setDraft(p=>({...p,icon:url}))} active={false}/>
+              <div>
+                <InlineEdit value={draft.name} onSave={n=>setDraft(p=>({...p,name:n}))} style={{fontSize:15,fontWeight:800,color:C.text}}/>
+                <div style={{fontSize:10,color:C.muted}}>Double-click name · click icon to change</div>
+              </div>
+            </div>
+            <div style={{display:"flex",gap:8,alignItems:"center"}}>
+              <button onClick={()=>folderRef.current?.click()}
+                style={{...SB,borderColor:C.amber,color:C.amber,display:"flex",alignItems:"center",gap:4}}
+                title="Upload an entire folder — clips land in the Unsorted inbox">
+                📁 Dump folder
+              </button>
+              <input ref={folderRef} type="file" accept="audio/*" multiple webkitdirectory="true" style={{display:"none"}} onChange={handleFolderDump}/>
+              {onDelete&&(
+                <button onClick={()=>{ if(window.confirm(`Delete theme "${draft.name}"?`))onDelete(); }}
+                  style={{...SB,borderColor:C.red,color:C.red}}>🗑 Delete</button>
+              )}
+              <button onClick={onClose} style={{background:"none",border:"none",color:C.muted,fontSize:20,cursor:"pointer"}}>✕</button>
+            </div>
           </div>
-        </div>
 
-        {/* Body */}
-        <div style={{overflowY:"auto",padding:"14px 18px",flex:1}}>
-          {/* Unsorted inbox */}
-          <UnsortedInbox clips={unsorted} onAssign={assignUnsorted} onRemove={removeUnsorted} onClear={()=>setUnsorted([])} audioRef={audioRef}/>
-          {/* Wildcard */}
-          <WildcardSection clips={draft.wildcardClips||[]} onUpdate={updateWildcard} audioRef={audioRef}/>
-          {/* Per-stage rows */}
-          {STAGES.map(stage=>(
-            <StageRow key={stage.key} stage={stage}
-              entry={draft.stageMap[stage.key]}
-              parentEntry={parentTheme?parentTheme.stageMap[stage.key]:undefined}
-              onUpdate={e=>updateStage(stage.key,e)}
-              audioRef={audioRef}/>
-          ))}
-        </div>
+          <div style={{overflowY:"auto",padding:"14px 18px",flex:1}}>
+            <UnsortedInbox clips={unsorted} onAssign={assignUnsorted} onRemove={removeUnsorted} onClear={()=>setUnsorted([])} audioRef={audioRef}/>
+            <WildcardSection clips={draft.wildcardClips||[]} onUpdate={updateWildcard} audioRef={audioRef}
+              parentClips={parentTheme?.wildcardClips||[]}
+              inherit={!!draft.wildcardInherit}
+              onToggleInherit={parentTheme?toggleWildcardInherit:undefined}/>
+            {STAGES.map(stage=>(
+              <StageRow key={stage.key} stage={stage}
+                entry={draft.stageMap[stage.key]}
+                parentEntry={parentTheme?parentTheme.stageMap?.[stage.key]:undefined}
+                onUpdate={e=>updateStage(stage.key,e)}
+                audioRef={audioRef}/>
+            ))}
+          </div>
 
-        <div style={FTR}>
-          <button onClick={()=>{onSave(draft);onActivate(draft,parentTheme);onClose();}} style={PB}>Save &amp; Activate</button>
-          <button onClick={()=>{onSave(draft);onClose();}} style={GB}>Save only</button>
+          <div style={FTR}>
+            <button onClick={()=>{onSave(draft);onActivate(draft,parentTheme);onClose();}} style={PB}>Save &amp; Activate</button>
+            <button onClick={()=>{onSave(draft);onClose();}} style={GB}>Save only</button>
+          </div>
         </div>
       </div>
     </div>
@@ -821,7 +909,11 @@ export default function Themes({ setSoundMap }) {
     setActiveId(parentTheme?parentTheme.id:theme.id);
     setActiveSubId(parentTheme?theme.id:null);
     const resolved=parentTheme?resolveStageMap(theme,parentTheme):theme.stageMap;
-    setSoundMap(stageMapToSoundMap(resolved,theme.wildcardClips||[]));
+    // Resolve wildcard: if sub inherits wildcards from parent, use parent's clips
+    const resolvedWildcard = parentTheme && theme.wildcardInherit
+      ? (parentTheme.wildcardClips||[])
+      : (theme.wildcardClips||[]);
+    setSoundMap(stageMapToSoundMap(resolved, resolvedWildcard));
   }
 
   function saveTheme(updated,parentTheme){
@@ -840,8 +932,16 @@ export default function Themes({ setSoundMap }) {
         ? {...norm, subThemes: t.subThemes}   // norm has latest sounds/name/icon; state has latest subs
         : t);
     });
-    if(parentTheme){ if(activeId===parentTheme.id&&activeSubId===norm.id) setSoundMap(stageMapToSoundMap(resolveStageMap(norm,parentTheme),norm.wildcardClips||[])); }
-    else { if(activeId===norm.id&&!activeSubId) setSoundMap(stageMapToSoundMap(norm.stageMap,norm.wildcardClips||[])); }
+    if(parentTheme){
+      if(activeId===parentTheme.id&&activeSubId===norm.id){
+        const resolvedWildcard = norm.wildcardInherit
+          ? (parentTheme.wildcardClips||[])
+          : (norm.wildcardClips||[]);
+        setSoundMap(stageMapToSoundMap(resolveStageMap(norm,parentTheme),resolvedWildcard));
+      }
+    } else {
+      if(activeId===norm.id&&!activeSubId) setSoundMap(stageMapToSoundMap(norm.stageMap,norm.wildcardClips||[]));
+    }
   }
 
   function deleteTheme(themeId){
