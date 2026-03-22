@@ -10,7 +10,7 @@
  */
 
 import { useState, useRef, useEffect } from "react";
-import { ASSET_THEMES, getManifestFileMap, getManifestFiles, getManifestThemeNames } from "../audioManifest";
+import { ASSET_THEMES, getManifestFileMap, getManifestThemeNames } from "../audioManifest";
 
 // ─── Stage definitions ────────────────────────────────────────────────────
 export const STAGES = [
