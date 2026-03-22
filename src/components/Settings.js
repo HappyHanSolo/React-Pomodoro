@@ -30,10 +30,64 @@ const COLOR_FIELDS = [
 function pad2(n) { return String(Math.max(0,parseInt(n,10)||0)).padStart(2,"0"); }
 
 function parseTimeStr(t){
-  if(typeof t==="string"&&t.includes(":")){const[m,s]=t.split(":").map(Number);return{mins:m||0,secs:s||0};}
+  if(typeof t==="string"&&t.includes(":")){ const[m,s]=t.split(":").map(Number);return{mins:m||0,secs:s||0}; }
   return{mins:parseInt(t,10)||0,secs:0};
 }
 function toTimeStr(mins,secs){ return `${pad2(mins)}:${pad2(secs)}`; }
+
+// ── Export helpers ────────────────────────────────────────────────────────
+// Strip audio dataURLs from clips — keep only the filename for re-linking later
+function stripAudio(themes) {
+  function stripTheme(t) {
+    const sm = {};
+    for (const [k,v] of Object.entries(t.stageMap||{})) {
+      sm[k] = {...v, clips: (v.clips||[]).map(c=>({id:c.id, name:c.name, enabled:c.enabled}))};
+    }
+    return {
+      ...t,
+      stageMap: sm,
+      wildcardClips: (t.wildcardClips||[]).map(c=>({id:c.id, name:c.name, enabled:c.enabled})),
+      icon: null,   // icons are images — drop them too; user can re-upload
+      subThemes: (t.subThemes||[]).map(stripTheme),
+    };
+  }
+  return themes.map(stripTheme);
+}
+
+// Re-link: walk themes and fill in .url for any clip whose .name matches an uploaded file
+function relinkThemes(themes, fileMap) {
+  function relinkClip(c) {
+    const url = fileMap[c.name] || fileMap[c.name.toLowerCase()];
+    return url ? {...c, url} : c;
+  }
+  function relinkTheme(t) {
+    const sm = {};
+    for (const [k,v] of Object.entries(t.stageMap||{})) {
+      sm[k] = {...v, clips: (v.clips||[]).map(relinkClip)};
+    }
+    return {
+      ...t,
+      stageMap: sm,
+      wildcardClips: (t.wildcardClips||[]).map(relinkClip),
+      subThemes: (t.subThemes||[]).map(relinkTheme),
+    };
+  }
+  return themes.map(relinkTheme);
+}
+
+// Count how many clips successfully got a URL after relinking
+function countLinked(themes) {
+  let linked=0, total=0;
+  function walk(t) {
+    for (const v of Object.values(t.stageMap||{})) {
+      for (const c of (v.clips||[])) { total++; if(c.url)linked++; }
+    }
+    for (const c of (t.wildcardClips||[])) { total++; if(c.url)linked++; }
+    for (const s of (t.subThemes||[])) walk(s);
+  }
+  themes.forEach(walk);
+  return {linked, total};
+}
 
 export default function Settings({
   pTime,sTime,lTime,setPTime,setSTime,setLTime,
@@ -47,20 +101,27 @@ export default function Settings({
   const [open, setOpen] = useState(false);
   const [tab,  setTab]  = useState("timer");
 
-  // Drafts
   const pP=parseTimeStr(pTime),sP=parseTimeStr(sTime),lP=parseTimeStr(lTime);
   const [draft, setDraft] = useState({pMins:pP.mins,pSecs:pP.secs,sMins:sP.mins,sSecs:sP.secs,lMins:lP.mins,lSecs:lP.secs,interval});
   const [draftColors, setDraftColors] = useState(colors);
   const [draftFont,   setDraftFont]   = useState(font);
-  const [customFonts, setCustomFonts] = useState(()=>LS.get("pomo_customFonts",[])); // [{label,value,dataUrl}]
+  const [customFonts, setCustomFonts] = useState(()=>LS.get("pomo_customFonts",[]));
 
-  const fontFileRef = useRef(null);
+  // Export/import state
+  const [relinkStatus, setRelinkStatus] = useState(null); // null | {linked,total,missing:[]}
+  const [importMsg,    setImportMsg]    = useState(null); // success/error string
+
+  const fontFileRef   = useRef(null);
+  const importFileRef = useRef(null);
+  const relinkFileRef = useRef(null);
 
   function openPanel(){
     const pp=parseTimeStr(pTime),sp=parseTimeStr(sTime),lp=parseTimeStr(lTime);
     setDraft({pMins:pp.mins,pSecs:pp.secs,sMins:sp.mins,sSecs:sp.secs,lMins:lp.mins,lSecs:lp.secs,interval});
     setDraftColors({...colors});
     setDraftFont(font);
+    setRelinkStatus(null);
+    setImportMsg(null);
     setOpen(true);
   }
 
@@ -68,7 +129,6 @@ export default function Settings({
     const f=e.target.files[0]; if(!f)return;
     const name=f.name.replace(/\.[^.]+$/,"");
     const dataUrl=await new Promise(res=>{const r=new FileReader();r.onload=ev=>res(ev.target.result);r.readAsDataURL(f);});
-    // Inject @font-face
     const fontName=`CustomFont_${Date.now()}`;
     const style=document.createElement("style");
     style.textContent=`@font-face{font-family:'${fontName}';src:url('${dataUrl}');}`;
@@ -81,13 +141,102 @@ export default function Settings({
     e.target.value="";
   }
 
+  // ── Export ────────────────────────────────────────────────────────────────
+  function handleExport() {
+    const themes = LS.get("pomo_themes_v3", []);
+    const payload = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      settings: {
+        pTime, sTime, lTime, interval,
+        showSeconds, autoStartBreaks, autoStartPomodoros,
+        colors, font,
+      },
+      themes: stripAudio(themes),
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {type:"application/json"});
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href     = url;
+    a.download = `pomodoro-config-${new Date().toISOString().slice(0,10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  // ── Import ────────────────────────────────────────────────────────────────
+  function handleImport(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        const payload = JSON.parse(ev.target.result);
+        if (!payload.version || !payload.themes) throw new Error("Invalid file format.");
+
+        // Restore settings
+        const s = payload.settings || {};
+        if (s.pTime)    { LS.set("pomo_pTime",    s.pTime);    setPTime(s.pTime); }
+        if (s.sTime)    { LS.set("pomo_sTime",    s.sTime);    setSTime(s.sTime); }
+        if (s.lTime)    { LS.set("pomo_lTime",    s.lTime);    setLTime(s.lTime); }
+        if (s.interval) { LS.set("pomo_interval", s.interval); setInterval(s.interval); }
+        if (s.colors)   { LS.set("pomo_colors",   s.colors);   setColors(s.colors); }
+        if (s.font)     { LS.set("pomo_font",     s.font);     setFont(s.font); }
+        if (s.showSeconds        !== undefined) { LS.set("pomo_showSec",    s.showSeconds);        setShowSeconds(s.showSeconds); }
+        if (s.autoStartBreaks    !== undefined) { LS.set("pomo_autoBreak",  s.autoStartBreaks);    setAutoStartBreaks(s.autoStartBreaks); }
+        if (s.autoStartPomodoros !== undefined) { LS.set("pomo_autoPomo",   s.autoStartPomodoros); setAutoStartPomodoros(s.autoStartPomodoros); }
+
+        // Restore themes (no audio yet — user must re-link)
+        LS.set("pomo_themes_v3", payload.themes);
+
+        const {linked, total} = countLinked(payload.themes);
+        setImportMsg(`✅ Imported ${payload.themes.length} theme(s). ${total} audio clip slot(s) need re-linking — upload your audio folder below.`);
+        setRelinkStatus(null);
+      } catch(err) {
+        setImportMsg(`❌ Import failed: ${err.message}`);
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  }
+
+  // ── Re-link audio from folder ─────────────────────────────────────────────
+  async function handleRelink(e) {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+
+    // Build filename → dataURL map
+    const fileMap = {};
+    await Promise.all(files.map(f => new Promise(res => {
+      const reader = new FileReader();
+      reader.onload = ev => { fileMap[f.name] = ev.target.result; res(); };
+      reader.readAsDataURL(f);
+    })));
+
+    const themes = LS.get("pomo_themes_v3", []);
+    const relinked = relinkThemes(themes, fileMap);
+    LS.set("pomo_themes_v3", relinked);
+
+    const {linked, total} = countLinked(relinked);
+    // Find which clips are still missing
+    const missing = [];
+    function findMissing(t) {
+      for (const v of Object.values(t.stageMap||{}))
+        for (const c of (v.clips||[])) if(!c.url) missing.push(c.name);
+      for (const c of (t.wildcardClips||[])) if(!c.url) missing.push(c.name);
+      for (const s of (t.subThemes||[])) findMissing(s);
+    }
+    relinked.forEach(findMissing);
+
+    setRelinkStatus({linked, total, missing: [...new Set(missing)]});
+    e.target.value = "";
+  }
+
   function applyAll(){
     const newP=toTimeStr(draft.pMins,draft.pSecs);
     const newS=toTimeStr(draft.sMins,draft.sSecs);
     const newL=toTimeStr(draft.lMins,draft.lSecs);
     const newI=Math.max(1,parseInt(draft.interval,10)||1);
 
-    // Load Google Font if needed
     const chosen=[...FONT_OPTIONS,...customFonts].find(f=>f.value===draftFont);
     if(chosen?.google){
       const id=`gf-${chosen.google}`;
@@ -98,7 +247,6 @@ export default function Settings({
         document.head.appendChild(link);
       }
     }
-    // Re-inject custom fonts (survive refresh via LS)
     customFonts.forEach(cf=>{
       const cfName=cf.value.replace(/['"]/g,"").split(",")[0];
       if(!document.querySelector(`style[data-font="${cfName}"]`)){
@@ -117,11 +265,11 @@ export default function Settings({
   }
 
   const d=(k,v)=>setDraft(p=>({...p,[k]:Math.max(0,parseInt(v,10)||0)}));
-
   const C2={bg:"#0f0e1a",border:"#1e1d2e",text:"#e0ddf5",muted:"#555",accent:"#7c6af7",card:"#13121f"};
   const inp2={background:C2.card,border:`1px solid ${C2.border}`,borderRadius:8,padding:"7px 10px",color:C2.text,fontSize:13,outline:"none",boxSizing:"border-box"};
   const numInp={...inp2,width:58,textAlign:"center",fontFamily:"monospace",fontWeight:700};
   const tBtn=(active)=>({padding:"5px 12px",borderRadius:"7px 7px 0 0",cursor:"pointer",background:active?C2.card:"transparent",border:active?`1px solid ${C2.border}`:"1px solid transparent",borderBottom:active?`1px solid ${C2.bg}`:`1px solid ${C2.border}`,color:active?C2.text:C2.muted,fontSize:12});
+  const actionBtn=(col)=>({display:"inline-flex",alignItems:"center",gap:6,padding:"9px 16px",borderRadius:9,border:`1px solid ${col}`,color:col,background:"transparent",fontSize:13,fontWeight:700,cursor:"pointer",width:"100%",justifyContent:"center"});
 
   const allFonts=[...FONT_OPTIONS,...customFonts];
 
@@ -141,8 +289,8 @@ export default function Settings({
               <button onClick={()=>setOpen(false)} style={{ background:"none",border:"none",color:C2.muted,fontSize:20,cursor:"pointer" }}>✕</button>
             </div>
 
-            <div style={{ display:"flex",padding:"10px 20px 0",gap:4,borderBottom:`1px solid ${C2.border}` }}>
-              {[["timer","⏱ Timer"],["appearance","🎨 Colors"],["font","🔤 Font"]].map(([k,l])=>(
+            <div style={{ display:"flex",padding:"10px 20px 0",gap:4,borderBottom:`1px solid ${C2.border}`,flexWrap:"wrap" }}>
+              {[["timer","⏱ Timer"],["appearance","🎨 Colors"],["font","🔤 Font"],["backup","💾 Backup"]].map(([k,l])=>(
                 <button key={k} onClick={()=>setTab(k)} style={tBtn(tab===k)}>{l}</button>
               ))}
             </div>
@@ -208,8 +356,6 @@ export default function Settings({
               {/* ── Font ── */}
               {tab==="font"&&<>
                 <p style={{ fontSize:11,fontWeight:700,color:C2.muted,textTransform:"uppercase",letterSpacing:.8,marginBottom:14 }}>Timer Font</p>
-
-                {/* Upload custom font */}
                 <div style={{ background:C2.card,borderRadius:10,padding:"12px 14px",border:`1px solid ${C2.border}`,marginBottom:16 }}>
                   <div style={{ fontSize:12,fontWeight:700,color:C2.text,marginBottom:6 }}>Upload custom font</div>
                   <p style={{ fontSize:11,color:C2.muted,marginBottom:8 }}>Upload any .ttf, .otf, or .woff2 file.</p>
@@ -218,19 +364,82 @@ export default function Settings({
                     <input ref={fontFileRef} type="file" accept=".ttf,.otf,.woff,.woff2" style={{ display:"none" }} onChange={handleFontUpload}/>
                   </label>
                 </div>
-
-                {/* Font list */}
                 <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
                   {allFonts.map(f=>(
                     <div key={f.value} onClick={()=>setDraftFont(f.value)}
                       style={{ display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 14px",borderRadius:10,cursor:"pointer",border:`1px solid ${draftFont===f.value?C2.accent:C2.border}`,background:draftFont===f.value?`${C2.accent}18`:C2.card,transition:"border-color .15s" }}>
                       <span style={{ fontSize:13,color:C2.text }}>{f.label}</span>
-                      <span style={{ fontSize:22,fontFamily:f.value,fontWeight:700,color:draftFont===f.value?C2.accent:C2.muted }}>
-                        00:00
-                      </span>
+                      <span style={{ fontSize:22,fontFamily:f.value,fontWeight:700,color:draftFont===f.value?C2.accent:C2.muted }}>00:00</span>
                     </div>
                   ))}
                 </div>
+              </>}
+
+              {/* ── Backup ── */}
+              {tab==="backup"&&<>
+                <p style={{ fontSize:11,fontWeight:700,color:C2.muted,textTransform:"uppercase",letterSpacing:.8,marginBottom:4 }}>Export</p>
+                <p style={{ fontSize:12,color:C2.muted,marginBottom:12,lineHeight:1.6 }}>
+                  Saves all your themes, stage assignments, and settings to a <code style={{color:C2.accent}}>.json</code> file.
+                  Audio clips are referenced by <strong style={{color:C2.text}}>filename only</strong> — not embedded.
+                  Keep your audio folder on Google Drive to re-link on any device.
+                </p>
+                <button onClick={handleExport} style={actionBtn("#22c55e")}>
+                  ⬇ Export config to file
+                </button>
+
+                <hr style={{ border:"none",borderTop:`1px solid ${C2.border}`,margin:"20px 0" }}/>
+
+                <p style={{ fontSize:11,fontWeight:700,color:C2.muted,textTransform:"uppercase",letterSpacing:.8,marginBottom:4 }}>Import</p>
+                <p style={{ fontSize:12,color:C2.muted,marginBottom:12,lineHeight:1.6 }}>
+                  Load a previously exported <code style={{color:C2.accent}}>.json</code> config file.
+                  Settings and theme structure are restored immediately.
+                  Then use <strong style={{color:C2.text}}>Re-link audio</strong> below to restore your sounds.
+                </p>
+                <label style={actionBtn("#3b82f6")}>
+                  ⬆ Import config from file
+                  <input ref={importFileRef} type="file" accept=".json" style={{display:"none"}} onChange={handleImport}/>
+                </label>
+
+                {importMsg&&(
+                  <div style={{ marginTop:10,padding:"10px 14px",borderRadius:9,background:`${importMsg.startsWith("✅")?"#22c55e":"#ef4444"}18`,border:`1px solid ${importMsg.startsWith("✅")?"#22c55e":"#ef4444"}44`,fontSize:12,color:C2.text,lineHeight:1.6 }}>
+                    {importMsg}
+                  </div>
+                )}
+
+                <hr style={{ border:"none",borderTop:`1px solid ${C2.border}`,margin:"20px 0" }}/>
+
+                <p style={{ fontSize:11,fontWeight:700,color:C2.muted,textTransform:"uppercase",letterSpacing:.8,marginBottom:4 }}>Re-link audio from folder</p>
+                <p style={{ fontSize:12,color:C2.muted,marginBottom:12,lineHeight:1.6 }}>
+                  After importing (or on a new device), point to your audio folder from Google Drive.
+                  Files are matched by <strong style={{color:C2.text}}>filename</strong> — folder structure doesn't matter.
+                </p>
+                <label style={actionBtn("#f59e0b")}>
+                  📁 Choose audio folder to re-link
+                  <input ref={relinkFileRef} type="file" accept="audio/*" multiple webkitdirectory="true" style={{display:"none"}} onChange={handleRelink}/>
+                </label>
+
+                {relinkStatus&&(
+                  <div style={{ marginTop:10,padding:"12px 14px",borderRadius:9,background:`${relinkStatus.linked===relinkStatus.total?"#22c55e":"#f59e0b"}18`,border:`1px solid ${relinkStatus.linked===relinkStatus.total?"#22c55e":"#f59e0b"}44`,fontSize:12,color:C2.text,lineHeight:1.7 }}>
+                    <div style={{fontWeight:700,marginBottom:4}}>
+                      {relinkStatus.linked === relinkStatus.total
+                        ? `✅ All ${relinkStatus.total} clips re-linked successfully! Reload the page to apply.`
+                        : `⚠️ ${relinkStatus.linked} / ${relinkStatus.total} clips re-linked.`}
+                    </div>
+                    {relinkStatus.missing.length>0&&(
+                      <>
+                        <div style={{color:C2.muted,marginBottom:4}}>Could not find these files — check filenames match exactly:</div>
+                        <div style={{fontFamily:"monospace",fontSize:11,color:"#f59e0b",lineHeight:2}}>
+                          {relinkStatus.missing.map(n=><div key={n}>• {n}</div>)}
+                        </div>
+                      </>
+                    )}
+                    {relinkStatus.linked===relinkStatus.total&&(
+                      <button onClick={()=>window.location.reload()} style={{marginTop:8,padding:"6px 14px",borderRadius:8,background:"#22c55e",border:"none",color:"#fff",fontWeight:700,fontSize:12,cursor:"pointer"}}>
+                        Reload now
+                      </button>
+                    )}
+                  </div>
+                )}
               </>}
 
             </div>
@@ -245,3 +454,5 @@ export default function Settings({
     </>
   );
 }
+
+
