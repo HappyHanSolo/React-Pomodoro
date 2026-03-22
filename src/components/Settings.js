@@ -167,13 +167,33 @@ export default function Settings({
   function handleImport(e) {
     const file = e.target.files[0];
     if (!file) return;
+
+    if (!file.name.endsWith(".json")) {
+      setImportMsg("❌ Wrong file type — please select a .json file exported from this app.");
+      e.target.value = "";
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = ev => {
+      let payload;
       try {
-        const payload = JSON.parse(ev.target.result);
-        if (!payload.version || !payload.themes) throw new Error("Invalid file format.");
+        payload = JSON.parse(ev.target.result);
+      } catch {
+        setImportMsg("❌ Could not read the file — it doesn't appear to be valid JSON. Make sure you're selecting the exported .json file and that it hasn't been edited manually.");
+        return;
+      }
 
-        // Restore settings
+      if (!payload.version) {
+        setImportMsg("❌ This file isn't a Pomodoro config export — the 'version' field is missing. Make sure you're using a file exported by this app.");
+        return;
+      }
+      if (!Array.isArray(payload.themes)) {
+        setImportMsg("❌ The file is missing the themes list. It may be corrupted or from an incompatible version.");
+        return;
+      }
+
+      try {
         const s = payload.settings || {};
         if (s.pTime)    { LS.set("pomo_pTime",    s.pTime);    setPTime(s.pTime); }
         if (s.sTime)    { LS.set("pomo_sTime",    s.sTime);    setSTime(s.sTime); }
@@ -181,19 +201,33 @@ export default function Settings({
         if (s.interval) { LS.set("pomo_interval", s.interval); setInterval(s.interval); }
         if (s.colors)   { LS.set("pomo_colors",   s.colors);   setColors(s.colors); }
         if (s.font)     { LS.set("pomo_font",     s.font);     setFont(s.font); }
-        if (s.showSeconds        !== undefined) { LS.set("pomo_showSec",    s.showSeconds);        setShowSeconds(s.showSeconds); }
-        if (s.autoStartBreaks    !== undefined) { LS.set("pomo_autoBreak",  s.autoStartBreaks);    setAutoStartBreaks(s.autoStartBreaks); }
-        if (s.autoStartPomodoros !== undefined) { LS.set("pomo_autoPomo",   s.autoStartPomodoros); setAutoStartPomodoros(s.autoStartPomodoros); }
-
-        // Restore themes (no audio yet — user must re-link)
-        LS.set("pomo_themes_v3", payload.themes);
-
-        const {linked, total} = countLinked(payload.themes);
-        setImportMsg(`✅ Imported ${payload.themes.length} theme(s). ${total} audio clip slot(s) need re-linking — upload your audio folder below.`);
-        setRelinkStatus(null);
+        if (s.showSeconds        !== undefined) { LS.set("pomo_showSec",   s.showSeconds);        setShowSeconds(s.showSeconds); }
+        if (s.autoStartBreaks    !== undefined) { LS.set("pomo_autoBreak", s.autoStartBreaks);    setAutoStartBreaks(s.autoStartBreaks); }
+        if (s.autoStartPomodoros !== undefined) { LS.set("pomo_autoPomo",  s.autoStartPomodoros); setAutoStartPomodoros(s.autoStartPomodoros); }
       } catch(err) {
-        setImportMsg(`❌ Import failed: ${err.message}`);
+        setImportMsg(`❌ Settings could not be fully restored: ${err.message}`);
+        return;
       }
+
+      try {
+        LS.set("pomo_themes_v3", payload.themes);
+      } catch(err) {
+        setImportMsg(`❌ Themes could not be saved to local storage: ${err.message}. Try clearing browser data and retrying.`);
+        return;
+      }
+
+      const {total} = countLinked(payload.themes);
+      const themeCount = payload.themes.length;
+      const subCount = payload.themes.reduce((n,t)=>(t.subThemes||[]).length+n, 0);
+      setImportMsg(
+        `✅ Imported ${themeCount} theme${themeCount!==1?"s":""}` +
+        (subCount ? ` (+ ${subCount} sub-theme${subCount!==1?"s":""})` : "") +
+        `. ${total > 0 ? `${total} audio clip slot${total!==1?"s":""} need re-linking — upload your audio folder below.` : "No audio clips to re-link."}`
+      );
+      setRelinkStatus(null);
+    };
+    reader.onerror = () => {
+      setImportMsg("❌ Failed to read the file. Check that it isn't corrupted and try again.");
     };
     reader.readAsText(file);
     e.target.value = "";
