@@ -158,6 +158,7 @@ export default function Settings({
   autoStartPomodoros,setAutoStartPomodoros,
   colors,setColors,
   font,setFont,
+  themes,   // live theme state from App — always up to date regardless of localStorage
 }) {
   const [open, setOpen] = useState(false);
   const [tab,  setTab]  = useState("timer");
@@ -209,7 +210,10 @@ export default function Settings({
 
   // ── Export ────────────────────────────────────────────────────────────────
   function handleExport() {
-    const themes = LS.get("pomo_themes_v3", []);
+    // Use live themes from React state — never stale, works even if localStorage is empty
+    const exportThemes = themes && themes.length > 0
+      ? themes
+      : LS.get("pomo_themes_v3", []); // fallback to localStorage if prop not wired yet
     const payload = {
       version: 1,
       exportedAt: new Date().toISOString(),
@@ -218,7 +222,7 @@ export default function Settings({
         showSeconds, autoStartBreaks, autoStartPomodoros,
         colors, font,
       },
-      themes: stripAudio(themes),
+      themes: stripAudio(exportThemes),
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], {type:"application/json"});
     const url  = URL.createObjectURL(blob);

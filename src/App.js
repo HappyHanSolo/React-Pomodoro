@@ -49,6 +49,7 @@ export default function App() {
   const [isRunning,     setIsRunning]     = useState(false);
   const [pomodoroCount, setPomodoroCount] = useState(0);
   const [soundMap,      setSoundMap]      = useState(emptySoundMap);
+  const [appThemes,     setAppThemes]     = useState([]);
 
   // Persist
   useEffect(() => LS.set("pomo_pTime",    pTime),    [pTime]);
@@ -116,7 +117,7 @@ export default function App() {
 
   return (
     <div style={{ background:colors.bgColor, width:"100vw", height:"100vh", display:"flex", overflow:"hidden", fontFamily:font }}>
-      <Themes setSoundMap={setSoundMap} />
+      <Themes setSoundMap={setSoundMap} onThemesChange={setAppThemes} />
 
       <div style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center" }}>
         <section style={{
@@ -178,6 +179,7 @@ export default function App() {
         autoStartPomodoros={autoStartPomodoros} setAutoStartPomodoros={setAutoStartPomodoros}
         colors={colors} setColors={setColors}
         font={font} setFont={setFont}
+        themes={appThemes}
       />
     </div>
   );

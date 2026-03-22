@@ -922,7 +922,7 @@ function SubPanel({ theme, activeSubId, anchorY, onActivateSub, onEditSub, onAdd
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────
 const ICON_SIZE = 52;
 
-export default function Themes({ setSoundMap }) {
+export default function Themes({ setSoundMap, onThemesChange }) {
   const [themes,       setThemes]      = useState(loadThemes);
   const [activeId,     setActiveId]    = useState(null);
   const [activeSubId,  setActiveSubId] = useState(null);
@@ -935,7 +935,7 @@ export default function Themes({ setSoundMap }) {
   const [hoverThemeId, setHoverThemeId] = useState(null);
   const audioRef = useRef(null);
 
-  useEffect(()=>{ lsSet(LS_KEY,themes); },[themes]);
+  useEffect(()=>{ lsSet(LS_KEY,themes); if(onThemesChange) onThemesChange(themes); },[themes]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Auto-relink audio from manifest on startup ───────────────────────────
   // For any theme/sub-theme whose name matches a folder in the manifest,
