@@ -275,9 +275,15 @@ function UnsortedInbox({ clips, onAssign, onRemove, onClear, audioRef }) {
 
 // ─── THEME EDITOR MODAL ───────────────────────────────────────────────────
 function ThemeEditorModal({ theme, parentTheme, onSave, onActivate, onDelete, onClose }) {
-  // Normalise on init — fills any missing stageMap keys so STAGES.map never hits undefined
-  const [draft,setDraft] = useState(() => normaliseTheme(JSON.parse(JSON.stringify(theme))));
-  const [unsorted,setUnsorted]     = useState([]);   // clips from folder dump
+  // Normalise on init and strip subThemes — the editor only manages sounds/name/icon,
+  // not sub-themes. Keeping subThemes out of the draft prevents saving from overwriting
+  // sub-themes that were created or edited after this editor was opened.
+  const [draft,setDraft] = useState(() => {
+    const base = normaliseTheme(JSON.parse(JSON.stringify(theme)));
+    const {subThemes: _dropped, ...rest} = base; // eslint-disable-line no-unused-vars
+    return rest;
+  });
+  const [unsorted,setUnsorted]     = useState([]);
   const audioRef                   = useRef(null);
   const folderRef                  = useRef(null);
 
@@ -821,8 +827,18 @@ export default function Themes({ setSoundMap }) {
   function saveTheme(updated,parentTheme){
     const norm = normaliseTheme(updated);
     setThemes(prev=>{
-      if(parentTheme) return prev.map(t=>t.id===parentTheme.id?{...t,subThemes:t.subThemes.map(s=>s.id===norm.id?norm:s)}:t);
-      return prev.map(t=>t.id===norm.id?norm:t);
+      if(parentTheme){
+        // Saving a sub-theme: update it inside its parent, preserve all other subs
+        return prev.map(t=>t.id===parentTheme.id
+          ? {...t, subThemes:t.subThemes.map(s=>s.id===norm.id?norm:s)}
+          : t);
+      }
+      // Saving a parent theme: merge norm into existing entry but KEEP the live
+      // subThemes from state — the editor draft is a snapshot from open-time and
+      // must not overwrite sub-themes created/edited since the editor was opened.
+      return prev.map(t=>t.id===norm.id
+        ? {...norm, subThemes: t.subThemes}   // norm has latest sounds/name/icon; state has latest subs
+        : t);
     });
     if(parentTheme){ if(activeId===parentTheme.id&&activeSubId===norm.id) setSoundMap(stageMapToSoundMap(resolveStageMap(norm,parentTheme),norm.wildcardClips||[])); }
     else { if(activeId===norm.id&&!activeSubId) setSoundMap(stageMapToSoundMap(norm.stageMap,norm.wildcardClips||[])); }
