@@ -910,9 +910,16 @@ export default function Themes({ setSoundMap }) {
                 {/* Main icon slot */}
                 <IconBox icon={displayIcon} size={ICON_SIZE} active={isActive}
                   onClick={e=>{ if(hasSubs){const rect=e.currentTarget.getBoundingClientRect();setSubPanel(p=>p?.theme?.id===theme.id?null:{theme,anchorY:rect.top});}else activate(theme,null); }}
-                  onDoubleClick={()=>setEditing({theme,parentTheme:null})}/>
-                {/* Edit badge */}
-                <button onClick={e=>{e.stopPropagation();setEditing({theme,parentTheme:null});}} style={{position:"absolute",bottom:-4,right:-4,width:17,height:17,borderRadius:"50%",background:C.accent,border:`2px solid ${C.bg}`,cursor:"pointer",fontSize:8,color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",padding:0}}>✏</button>
+                  onDoubleClick={()=>{
+                    if(activeSub) setEditing({theme:activeSub,parentTheme:theme});
+                    else setEditing({theme,parentTheme:null});
+                  }}/>
+                {/* Edit badge — opens active sub editor if a sub is selected, else parent */}
+                <button onClick={e=>{
+                  e.stopPropagation();
+                  if(activeSub) setEditing({theme:activeSub,parentTheme:theme});
+                  else setEditing({theme,parentTheme:null});
+                }} style={{position:"absolute",bottom:-4,right:-4,width:17,height:17,borderRadius:"50%",background:C.accent,border:`2px solid ${C.bg}`,cursor:"pointer",fontSize:8,color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",padding:0}}>✏</button>
                 {/* Sub badge */}
                 {hasSubs&&<div style={{position:"absolute",top:activeSub?22:-4,right:-4,width:16,height:16,borderRadius:"50%",background:subPanel?.theme?.id===theme.id?C.accent:activeSub?"#22c55e":"#333",border:`2px solid ${C.bg}`,fontSize:9,color:"#fff",display:"flex",alignItems:"center",justifyContent:"center"}} title={activeSub?`Active: ${activeSub.name}`:undefined}>{activeSub?"✓":theme.subThemes.length}</div>}
                 {/* Delete badge */}
@@ -941,23 +948,40 @@ export default function Themes({ setSoundMap }) {
       </div>
 
       {/* ── Sub-theme popout ── */}
-      {subPanel&&<SubPanel theme={subPanel.theme} activeSubId={activeSubId} anchorY={subPanel.anchorY}
-        onActivateSub={activate}
-        onEditSub={(sub,p)=>{setEditing({theme:sub,parentTheme:p});setSubPanel(null);}}
-        onAddSub={()=>{setShowNew({parentTheme:subPanel.theme});setSubPanel(null);}}
-        onUpdateSubIcon={updateSubIcon}
-        onDeleteSub={deleteSubTheme}
-        onClose={()=>setSubPanel(null)}/>}
+      {subPanel&&(()=>{
+        // Always look up the live theme from state — subPanel.theme is a stale snapshot
+        const liveTheme = themes.find(t=>t.id===subPanel.theme.id) || subPanel.theme;
+        return (
+          <SubPanel theme={liveTheme} activeSubId={activeSubId} anchorY={subPanel.anchorY}
+            onActivateSub={activate}
+            onEditSub={(sub,p)=>{setEditing({theme:sub,parentTheme:p});setSubPanel(null);}}
+            onAddSub={()=>{setShowNew({parentTheme:liveTheme});setSubPanel(null);}}
+            onUpdateSubIcon={updateSubIcon}
+            onDeleteSub={deleteSubTheme}
+            onClose={()=>setSubPanel(null)}/>
+        );
+      })()}
 
       {/* ── Theme editor ── */}
-      {editing&&<ThemeEditorModal theme={editing.theme} parentTheme={editing.parentTheme}
-        onSave={u=>saveTheme(u,editing.parentTheme)}
-        onActivate={activate}
-        onDelete={editing.parentTheme
-          ? ()=>{ deleteSubTheme(editing.parentTheme.id,editing.theme.id); setEditing(null); }
-          : ()=>{ deleteTheme(editing.theme.id); setEditing(null); }
-        }
-        onClose={()=>{stopAudio();setEditing(null);}}/>}
+      {editing&&(()=>{
+        // Always resolve the live versions from state to avoid stale snapshots
+        const liveParent = editing.parentTheme
+          ? themes.find(t=>t.id===editing.parentTheme.id) || editing.parentTheme
+          : null;
+        const liveSub = liveParent
+          ? (liveParent.subThemes||[]).find(s=>s.id===editing.theme.id) || editing.theme
+          : themes.find(t=>t.id===editing.theme.id) || editing.theme;
+        return (
+          <ThemeEditorModal theme={liveSub} parentTheme={liveParent}
+            onSave={u=>saveTheme(u,liveParent)}
+            onActivate={activate}
+            onDelete={liveParent
+              ? ()=>{ deleteSubTheme(liveParent.id,liveSub.id); setEditing(null); }
+              : ()=>{ deleteTheme(liveSub.id); setEditing(null); }
+            }
+            onClose={()=>{stopAudio();setEditing(null);}}/>
+        );
+      })()}
 
       {showNew&&<NewThemeModal parentThemeName={showNew.parentTheme?.name} existingThemes={themes}
         onCreate={(t,pid)=>addTheme(t,showNew.parentTheme?.id||pid)}
