@@ -33,9 +33,10 @@ export function stageMapToSoundMap(sm, wildcardClips = []) {
   const out = {};
   for (const s of STAGES) {
     const e = sm[s.key] || emptyEntry();
-    out[s.key] = { clips: e.clips.filter(c=>c.enabled!==false).map(c=>c.url), random:e.random, enabled:e.enabled, fiftyFifty:e.fiftyFifty };
+    // Filter out clips with no url (stripped for export, not yet relinked)
+    out[s.key] = { clips: e.clips.filter(c=>c.enabled!==false && c.url).map(c=>c.url), random:e.random, enabled:e.enabled, fiftyFifty:e.fiftyFifty };
   }
-  out.__wildcard = wildcardClips.filter(c=>c.enabled!==false).map(c=>c.url);
+  out.__wildcard = wildcardClips.filter(c=>c.enabled!==false && c.url).map(c=>c.url);
   return out;
 }
 

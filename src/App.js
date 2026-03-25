@@ -51,6 +51,18 @@ export default function App() {
   const [soundMap,      setSoundMap]      = useState(emptySoundMap);
   const [appThemes,     setAppThemes]     = useState([]);
 
+  // ── Fullscreen ───────────────────────────────────────────────────────────
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  useEffect(() => {
+    const handler = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", handler);
+    return () => document.removeEventListener("fullscreenchange", handler);
+  }, []);
+  function toggleFullscreen() {
+    if (!document.fullscreenElement) document.documentElement.requestFullscreen?.();
+    else document.exitFullscreen?.();
+  }
+
   // Persist
   useEffect(() => LS.set("pomo_pTime",    pTime),    [pTime]);
   useEffect(() => LS.set("pomo_sTime",    sTime),    [sTime]);
@@ -62,7 +74,7 @@ export default function App() {
   useEffect(() => LS.set("pomo_colors", colors), [colors]);
   useEffect(() => LS.set("pomo_font",   font),   [font]);
 
-  // ── Refs passed directly to TimerButton so it always sees fresh values ──
+  // ── Refs passed directly to TimerButton ──────────────────────────────────
   const soundMapRef  = useRef(soundMap);
   const sTimeRef     = useRef(sTime);
   const lTimeRef     = useRef(lTime);
@@ -79,7 +91,7 @@ export default function App() {
   useEffect(() => { autoBreakRef.current = autoStartBreaks;    }, [autoStartBreaks]);
   useEffect(() => { autoPomRef.current   = autoStartPomodoros; }, [autoStartPomodoros]);
 
-  // ── Sync timer display when settings change (only if not running) ───────
+  // ── Sync timer display when settings change ───────────────────────────────
   const phaseRef = useRef(phase);
   useEffect(() => { phaseRef.current = phase; }, [phase]);
 
@@ -87,18 +99,10 @@ export default function App() {
   useEffect(() => { if (!isRunning && phaseRef.current === PHASES.SHORT_BREAK) { setTimer(sTime); setReset(sTime); } }, [sTime, isRunning]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (!isRunning && phaseRef.current === PHASES.LONG_BREAK)  { setTimer(lTime); setReset(lTime); } }, [lTime, isRunning]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Finish callbacks — only responsible for side effects in App ─────────
-  // TimerButton handles auto-start directly; these just update App state.
-  const onPomodoroFinish = useCallback(() => {
-    // Audio (pomodoroFinish, cycleFinish) is handled sequentially in TimerButton.
-    // This callback is for any App-level side-effects only.
-  }, []);
+  const onPomodoroFinish = useCallback(() => {}, []);
+  const onBreakFinish    = useCallback(() => {}, []);
 
-  const onBreakFinish = useCallback(() => {
-    // Nothing extra needed — TimerButton handles auto-start
-  }, []);
-
-  // ── Manual phase switch ─────────────────────────────────────────────────
+  // ── Manual phase switch ───────────────────────────────────────────────────
   function switchPhase(newPhase) {
     setIsRunning(false);
     setPhase(newPhase);
@@ -115,29 +119,58 @@ export default function App() {
     [PHASES.LONG_BREAK]:  colors.longBreakColor,
   }[phase];
 
+  const isBreakPhase = phase === PHASES.SHORT_BREAK || phase === PHASES.LONG_BREAK;
+
+  // ── Cycle dots — groups of 5 per row ─────────────────────────────────────
+  const completedInCycle = pomodoroCount % interval;
+  const DOTS_PER_ROW = 5;
+  const dotRows = [];
+  for (let i = 0; i < interval; i += DOTS_PER_ROW) {
+    dotRows.push(Array.from({ length: Math.min(DOTS_PER_ROW, interval - i) }, (_, j) => i + j));
+  }
+
   return (
     <div style={{ background:colors.bgColor, width:"100vw", height:"100vh", display:"flex", overflow:"hidden", fontFamily:font }}>
       <Themes setSoundMap={setSoundMap} onThemesChange={setAppThemes} />
 
-      <div style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center" }}>
+      <div style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", position:"relative" }}>
+
+        {/* Fullscreen button */}
+        <button
+          onClick={toggleFullscreen}
+          title={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+          style={{
+            position:"absolute", top:16, right:16,
+            background:"rgba(255,255,255,.1)", border:"1px solid rgba(255,255,255,.2)",
+            color:"#fff", borderRadius:8, padding:"6px 12px", cursor:"pointer",
+            fontSize:13, fontFamily:font, fontWeight:600,
+          }}
+        >
+          {isFullscreen ? "⤡ Exit" : "⤢ Fullscreen"}
+        </button>
+
         <section style={{
           background: phaseBG + "cc",
-          width:"40vw", minWidth:320,
+          width:"40vw", minWidth:320, maxWidth:520,
           display:"flex", flexDirection:"column", alignItems:"center",
           padding:"40px 20px", borderRadius:16,
           boxShadow:"0 8px 40px rgba(0,0,0,.4)",
         }}>
           <PomodoroButtons phase={phase} switchPhase={switchPhase} colors={colors} font={font}/>
 
-          {/* Cycle dots */}
-          <div style={{ display:"flex", gap:8, margin:"12px 0" }}>
-            {Array.from({ length: interval }).map((_, i) => (
-              <div key={i} style={{
-                width:12, height:12, borderRadius:"50%",
-                border:`2px solid ${colors.timerTextColor}`,
-                background: i < (pomodoroCount % interval) ? colors.timerTextColor : "transparent",
-                transition:"background .3s",
-              }}/>
+          {/* Cycle dots — max 5 per row, stacks into multiple rows */}
+          <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:6, margin:"12px 0" }}>
+            {dotRows.map((row, ri) => (
+              <div key={ri} style={{ display:"flex", gap:8 }}>
+                {row.map(i => (
+                  <div key={i} style={{
+                    width:12, height:12, borderRadius:"50%",
+                    border:`2px solid ${colors.timerTextColor}`,
+                    background: i < completedInCycle ? colors.timerTextColor : "transparent",
+                    transition:"background .3s",
+                  }}/>
+                ))}
+              </div>
             ))}
           </div>
 
@@ -155,6 +188,7 @@ export default function App() {
             timer={timer}             setTimer={setTimer}
             reset={reset}             setReset={setReset}
             phase={phase}             setPhase={setPhase}
+            isBreakPhase={isBreakPhase}
             pomodoroCount={pomodoroCount} setPomodoroCount={setPomodoroCount}
             interval={interval}
             soundMapRef={soundMapRef}

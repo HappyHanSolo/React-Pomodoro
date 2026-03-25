@@ -84,13 +84,14 @@ export default function TimerButton({
   timer, setTimer,
   reset, setReset,
   phase, setPhase,
+  isBreakPhase,        // passed from App — avoids stale phaseRef in label
   pomodoroCount, setPomodoroCount,
   interval,
   soundMapRef,
   sTimeRef, lTimeRef, pTimeRef, intervalRef,
   autoBreakRef, autoPomRef,
-  onPomodoroFinish,   // () => void — App side-effects only (no audio)
-  onBreakFinish,      // () => void
+  onPomodoroFinish,
+  onBreakFinish,
   colors, font,
 }) {
   const timerID     = useRef(null);
@@ -242,7 +243,12 @@ export default function TimerButton({
     if (audioWait) return;
 
     if (!isRunning) {
-      const isFresh = hasFinished.current || (timer === reset);
+      // isFresh: only restart if the timer has fully finished OR was never started
+      // (timer === reset AND timerID was never set = pristine state)
+      // Crucially: after a phase switch, hasFinished is false and timer===reset
+      // but we want Start not Restart — that's correct fresh behaviour.
+      // After pause, hasFinished is false and timer < reset — resume.
+      const isFresh = hasFinished.current || (!timerID.current && timer === reset);
       setIsRunning(true);
       if (isFresh) {
         hasFinished.current = false;
@@ -251,7 +257,7 @@ export default function TimerButton({
         setTimer(t);
         _runTimer(parseT(t), phaseRef.current, pomCountRef.current);
       } else {
-        // Resume
+        // Resume from pause
         const resumeSrc = stageSrc(soundMapRef.current, "resume", 0);
         playInstantWithWildcard(resumeSrc, "resume", soundMapRef.current, instantRef);
         _runTimer(parseT(timer), phaseRef.current, pomCountRef.current);
@@ -338,8 +344,11 @@ export default function TimerButton({
     transition:   "opacity .2s",
   });
 
-  const isBreakPhase = phase === PHASES.SHORT_BREAK || phase === PHASES.LONG_BREAK;
-  const label = isRunning ? "Pause" : hasFinished.current ? "Restart" : "Start";
+  // Show "Restart" only if the current phase itself finished, not a previous one
+  // isBreakPhase comes from App so it's always current
+  const label = isRunning ? "Pause"
+    : (hasFinished.current && !isBreakPhase) ? "Restart"
+    : "Start";
 
   return (
     <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:8, marginTop:16 }}>
