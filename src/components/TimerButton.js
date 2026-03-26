@@ -14,10 +14,6 @@ function stageSrc(sm, key, idx = 0) {
   return pickClip(sm?.[key], idx) ?? null;
 }
 
-/**
- * Play src and return a Promise that resolves when audio ends (or errors/absent).
- * Stores the Audio in `ref` so it can be skipped externally.
- */
 function playAndWait(src, ref) {
   return new Promise(resolve => {
     if (!src) { resolve(); return; }
@@ -32,41 +28,21 @@ function playAndWait(src, ref) {
   });
 }
 
-/**
- * Play a non-blocking instant sound (start / pause / resume).
- * Stored in instantRef so it can be stopped on reset.
- * WILDCARD LOGIC: for eligible stages, there is a randomly-determined
- * chance (re-rolled each call) that the wildcard plays INSTEAD of the
- * normal sound. Pomodoro finish and cycle finish are excluded.
- *
- * Returns the src that was actually played (or null).
- */
 function playInstantWithWildcard(src, stageKey, sm, instantRef) {
-  const wildcardEligible =
-    stageKey !== "pomodoroFinish" &&
-    stageKey !== "cycleFinish";
-
+  const excluded = stageKey === "pomodoroFinish" || stageKey === "cycleFinish";
   const pool = sm?.__wildcard;
-  const hasWildcard = wildcardEligible && pool?.length > 0;
-
-  // Fully random chance: threshold is itself random (0–1), then we roll against it.
-  // Two separate named variables avoids the no-self-compare lint rule.
+  const hasWildcard = !excluded && pool?.length > 0;
   const wildcardThreshold = Math.random();
   const wildcardRoll = Math.random();
   const wildcardFires = hasWildcard && wildcardRoll < wildcardThreshold;
-
-  const actualSrc = wildcardFires
-    ? pool[Math.floor(Math.random() * pool.length)]
-    : src;
-
-  if (!actualSrc) return null;
+  const actualSrc = wildcardFires ? pool[Math.floor(Math.random() * pool.length)] : src;
+  if (!actualSrc) return;
   try {
     try { instantRef.current?.pause(); } catch {}
     const a = new Audio(actualSrc);
     instantRef.current = a;
     a.play().catch(() => {});
   } catch {}
-  return actualSrc;
 }
 
 function parseT(t) {
@@ -84,7 +60,7 @@ export default function TimerButton({
   timer, setTimer,
   reset, setReset,
   phase, setPhase,
-  isBreakPhase,        // passed from App — avoids stale phaseRef in label
+  isBreakPhase,
   pomodoroCount, setPomodoroCount,
   interval,
   soundMapRef,
@@ -94,20 +70,20 @@ export default function TimerButton({
   onBreakFinish,
   colors, font,
 }) {
-  const timerID     = useRef(null);
-  const hasFinished = useRef(false);
-  const hasStarted  = useRef(false); // true once _runTimer has been called for current phase
+  // Use a ref for the interval ID
+  const timerID      = useRef(null);
+  // remRef holds the current countdown value — avoids stale closure in tick()
+  const remRef       = useRef(0);
+  // Track timer state with refs (not React state) to avoid stale closures
+  const hasFinished  = useRef(false);
+  const hasStarted   = useRef(false); // set true on first _runTimer, false on any reset/phase-switch
 
-  // finishRef  — holds the currently-playing finish/cycle audio (can be skipped)
-  // instantRef — holds start/pause/resume/wildcard audio (independent)
-  const finishRef  = useRef(null);
-  const instantRef = useRef(null);
-
-  // Expose a skip-resolve function so the skip button can resolve playAndWait early
+  const finishRef    = useRef(null);
+  const instantRef   = useRef(null);
   const skipResolveRef = useRef(null);
 
-  const [audioWait,   setAudioWait]   = useState(false);
-  const [audioLabel,  setAudioLabel]  = useState(""); // what's playing
+  const [audioWait,  setAudioWait]  = useState(false);
+  const [audioLabel, setAudioLabel] = useState("");
 
   const phaseRef    = useRef(phase);
   const pomCountRef = useRef(pomodoroCount);
@@ -118,26 +94,21 @@ export default function TimerButton({
   useEffect(() => { resetRef.current    = reset;         }, [reset]);
 
   useEffect(() => () => {
-    stopTimer();
+    clearInterval(timerID.current);
     try { finishRef.current?.pause();  } catch {}
     try { instantRef.current?.pause(); } catch {}
   }, []);
 
   function stopTimer() {
-    if (timerID.current) { clearInterval(timerID.current); timerID.current = null; }
+    if (timerID.current) {
+      clearInterval(timerID.current);
+      timerID.current = null;
+    }
   }
 
-  /**
-   * Wrap playAndWait so:
-   *  1. skipResolveRef is registered (skip button calls it)
-   *  2. setAudioLabel shows what's playing
-   *  3. Cleans up after
-   */
   function playFinishAndWait(src, label) {
-    setAudioLabel(label);
-    setAudioWait(true);
+    if (label) { setAudioLabel(label); setAudioWait(true); }
     return new Promise(resolve => {
-      // Register skip handler
       skipResolveRef.current = () => {
         try { finishRef.current?.pause(); } catch {}
         skipResolveRef.current = null;
@@ -151,40 +122,44 @@ export default function TimerButton({
   }
 
   // ── Core countdown ──────────────────────────────────────────────────────
+  // initSecs is the starting value. remRef holds current value so pause/stop
+  // can read it without stale closure issues.
   function _runTimer(initSecs, runPhase, soundIdx) {
-    if (timerID.current) return;
-    let rem = initSecs;
+    if (timerID.current) return; // already running
+    remRef.current = initSecs;
     hasFinished.current = false;
     hasStarted.current  = true;
     setAudioWait(false);
     setAudioLabel("");
 
-    // Start sound — wildcard may replace it
     const startKey = runPhase === PHASES.POMODORO ? "pomodoroStart" : "breakStart";
-    const startSrc = stageSrc(soundMapRef.current, startKey, 0);
-    playInstantWithWildcard(startSrc, startKey, soundMapRef.current, instantRef);
+    playInstantWithWildcard(
+      stageSrc(soundMapRef.current, startKey, 0),
+      startKey, soundMapRef.current, instantRef
+    );
 
     function tick() {
-      setTimer(fmtT(rem));
+      // Read and display current value
+      setTimer(fmtT(remRef.current));
 
-      if (rem === 0) {
+      if (remRef.current === 0) {
         stopTimer();
         hasFinished.current = true;
+        hasStarted.current  = false;
         setIsRunning(false);
 
-        const sm      = soundMapRef.current;
-        const isPomo  = runPhase === PHASES.POMODORO;
+        const sm     = soundMapRef.current;
+        const isPomo = runPhase === PHASES.POMODORO;
 
         if (isPomo) {
           const newCount = pomCountRef.current + 1;
           pomCountRef.current = newCount;
           setPomodoroCount(newCount);
-          onPomodoroFinish(); // App side-effects only
+          onPomodoroFinish();
 
           const isCycle = newCount % intervalRef.current === 0;
+          const finSrc  = stageSrc(sm, "pomodoroFinish", soundIdx);
 
-          // Play pomodoroFinish, then switch to break phase
-          const finSrc = stageSrc(sm, "pomodoroFinish", soundIdx);
           playFinishAndWait(finSrc, "Pomodoro finish").then(() => {
             setAudioWait(false);
             setAudioLabel("");
@@ -196,6 +171,7 @@ export default function TimerButton({
             setTimer(bTime);
             setReset(bTime);
             resetRef.current = bTime;
+            hasStarted.current = false;
 
             if (autoBreakRef.current) {
               setIsRunning(true);
@@ -204,15 +180,12 @@ export default function TimerButton({
           });
 
         } else {
-          // Break finish
           const isLongBreak = runPhase === PHASES.LONG_BREAK;
           const finSrc = stageSrc(sm, "breakFinish", soundIdx);
-          playFinishAndWait(finSrc, "Break finish").then(() => {
 
-            // If this was the long break (end of a full cycle), play cycleFinish after
+          playFinishAndWait(finSrc, "Break finish").then(() => {
             const cfSrc = isLongBreak ? stageSrc(sm, "cycleFinish", 0) : null;
             return playFinishAndWait(cfSrc, isLongBreak ? "Cycle finish" : "");
-
           }).then(() => {
             setAudioWait(false);
             setAudioLabel("");
@@ -224,6 +197,7 @@ export default function TimerButton({
             setTimer(pTime);
             setReset(pTime);
             resetRef.current = pTime;
+            hasStarted.current = false;
 
             if (autoPomRef.current) {
               setIsRunning(true);
@@ -233,7 +207,8 @@ export default function TimerButton({
         }
         return;
       }
-      rem -= 1;
+
+      remRef.current -= 1;
     }
 
     tick();
@@ -245,7 +220,7 @@ export default function TimerButton({
     if (audioWait) return;
 
     if (!isRunning) {
-      // Fresh = never started this phase, OR finished. NOT after a pause.
+      // Fresh = phase never started, or finished. After pause: hasStarted=true, hasFinished=false → resume.
       const isFresh = !hasStarted.current || hasFinished.current;
       setIsRunning(true);
       if (isFresh) {
@@ -254,29 +229,34 @@ export default function TimerButton({
         try { finishRef.current?.pause(); } catch {}
         const t = resetRef.current;
         setTimer(t);
+        remRef.current = parseT(t);
         _runTimer(parseT(t), phaseRef.current, pomCountRef.current);
       } else {
-        // Resume from pause
-        const resumeSrc = stageSrc(soundMapRef.current, "resume", 0);
-        playInstantWithWildcard(resumeSrc, "resume", soundMapRef.current, instantRef);
-        _runTimer(parseT(timer), phaseRef.current, pomCountRef.current);
+        // Resume — remRef still holds where we paused
+        playInstantWithWildcard(
+          stageSrc(soundMapRef.current, "resume", 0),
+          "resume", soundMapRef.current, instantRef
+        );
+        _runTimer(remRef.current, phaseRef.current, pomCountRef.current);
       }
     } else {
+      // Pause — stop interval, remRef keeps current value for resume
       stopTimer();
       setIsRunning(false);
-      const pauseSrc = stageSrc(soundMapRef.current, "pause", 0);
-      playInstantWithWildcard(pauseSrc, "pause", soundMapRef.current, instantRef);
+      playInstantWithWildcard(
+        stageSrc(soundMapRef.current, "pause", 0),
+        "pause", soundMapRef.current, instantRef
+      );
     }
   }
 
-  // ── Skip audio (finish sound only) ──────────────────────────────────────
+  // ── Skip audio ───────────────────────────────────────────────────────────
   function handleSkipAudio() {
-    if (skipResolveRef.current) {
-      skipResolveRef.current(); // resolves playFinishAndWait early
-    }
+    if (skipResolveRef.current) skipResolveRef.current();
   }
 
-  // ── Reset current timer ──────────────────────────────────────────────────
+  // ── Reset = full cycle reset ──────────────────────────────────────────────
+  // Stops everything, resets count, switches back to Pomodoro
   function handleReset() {
     stopTimer();
     skipResolveRef.current = null;
@@ -287,28 +267,19 @@ export default function TimerButton({
     setAudioWait(false);
     setAudioLabel("");
     setIsRunning(false);
-    setTimer(reset);
-  }
 
-  // ── Reset entire cycle ───────────────────────────────────────────────────
-  function handleCycleReset() {
-    stopTimer();
-    skipResolveRef.current = null;
-    try { finishRef.current?.pause();  finishRef.current  = null; } catch {}
-    try { instantRef.current?.pause(); instantRef.current = null; } catch {}
-    hasFinished.current = false;
-    hasStarted.current  = false;
-    setAudioWait(false);
-    setAudioLabel("");
-    setIsRunning(false);
+    // Reset count
     setPomodoroCount(0);
     pomCountRef.current = 0;
+
+    // Return to Pomodoro phase
     const pTime = pTimeRef.current;
     setPhase(PHASES.POMODORO);
     phaseRef.current = PHASES.POMODORO;
     setTimer(pTime);
     setReset(pTime);
-    resetRef.current = pTime;
+    resetRef.current  = pTime;
+    remRef.current    = parseT(pTime);
   }
 
   // ── Skip Break ───────────────────────────────────────────────────────────
@@ -324,10 +295,11 @@ export default function TimerButton({
     setIsRunning(false);
     const pTime = pTimeRef.current;
     setPhase(PHASES.POMODORO);
-    phaseRef.current = PHASES.POMODORO;
+    phaseRef.current  = PHASES.POMODORO;
     setTimer(pTime);
     setReset(pTime);
-    resetRef.current = pTime;
+    resetRef.current  = pTime;
+    remRef.current    = parseT(pTime);
   }
 
   // ── Styles ────────────────────────────────────────────────────────────────
@@ -346,8 +318,6 @@ export default function TimerButton({
     transition:   "opacity .2s",
   });
 
-  // Show "Restart" only if the current phase itself finished, not a previous one
-  // isBreakPhase comes from App so it's always current
   const label = isRunning ? "Pause"
     : (hasFinished.current && !isBreakPhase) ? "Restart"
     : "Start";
@@ -355,42 +325,29 @@ export default function TimerButton({
   return (
     <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:8, marginTop:16 }}>
 
-      {/* Main controls */}
       <div style={{ display:"flex" }}>
         <button style={{ ...btn(), opacity: audioWait ? 0.4 : 1, cursor: audioWait ? "not-allowed" : "pointer" }}
           onClick={handleStartPause}>{label}</button>
-        <button style={btn("rgba(0,0,0,.3)")} onClick={handleReset}>Reset</button>
+        <button style={btn("rgba(0,0,0,.3)")} onClick={handleReset} title="Reset entire cycle">Reset</button>
       </div>
 
-      {/* Audio playing indicator + skip button */}
       {audioWait && (
         <div style={{ display:"flex", alignItems:"center", gap:8 }}>
           <div style={{ fontSize:11, color:"rgba(255,255,255,.5)", letterSpacing:.5 }}>
             ♪ {audioLabel || "playing"}…
           </div>
-          <button
-            onClick={handleSkipAudio}
-            style={{ ...btn("rgba(255,255,255,.15)", true), padding:"4px 10px", fontSize:11 }}
-            title="Skip this sound"
-          >
+          <button onClick={handleSkipAudio}
+            style={{ ...btn("rgba(255,255,255,.15)", true), padding:"4px 10px", fontSize:11 }}>
             ⏭ Skip audio
           </button>
         </div>
       )}
 
-      {/* Skip Break */}
       {isBreakPhase && !audioWait && (
-        <button style={btn("rgba(255,255,255,.12)", true)} onClick={handleSkipBreak}
-          title="Skip break and return to Pomodoro">
+        <button style={btn("rgba(255,255,255,.12)", true)} onClick={handleSkipBreak}>
           ⏭ Skip Break
         </button>
       )}
-
-      {/* Cycle reset */}
-      <button style={btn("rgba(255,255,255,.08)", true)} onClick={handleCycleReset}
-        title="Reset entire cycle — clears count and returns to Pomodoro">
-        ↺ Reset Cycle
-      </button>
 
     </div>
   );
