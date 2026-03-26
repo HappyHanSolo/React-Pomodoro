@@ -96,6 +96,7 @@ export default function TimerButton({
 }) {
   const timerID     = useRef(null);
   const hasFinished = useRef(false);
+  const hasStarted  = useRef(false); // true once _runTimer has been called for current phase
 
   // finishRef  — holds the currently-playing finish/cycle audio (can be skipped)
   // instantRef — holds start/pause/resume/wildcard audio (independent)
@@ -154,6 +155,7 @@ export default function TimerButton({
     if (timerID.current) return;
     let rem = initSecs;
     hasFinished.current = false;
+    hasStarted.current  = true;
     setAudioWait(false);
     setAudioLabel("");
 
@@ -243,15 +245,12 @@ export default function TimerButton({
     if (audioWait) return;
 
     if (!isRunning) {
-      // isFresh: only restart if the timer has fully finished OR was never started
-      // (timer === reset AND timerID was never set = pristine state)
-      // Crucially: after a phase switch, hasFinished is false and timer===reset
-      // but we want Start not Restart — that's correct fresh behaviour.
-      // After pause, hasFinished is false and timer < reset — resume.
-      const isFresh = hasFinished.current || (!timerID.current && timer === reset);
+      // Fresh = never started this phase, OR finished. NOT after a pause.
+      const isFresh = !hasStarted.current || hasFinished.current;
       setIsRunning(true);
       if (isFresh) {
         hasFinished.current = false;
+        hasStarted.current  = false;
         try { finishRef.current?.pause(); } catch {}
         const t = resetRef.current;
         setTimer(t);
@@ -284,6 +283,7 @@ export default function TimerButton({
     try { finishRef.current?.pause();  finishRef.current  = null; } catch {}
     try { instantRef.current?.pause(); instantRef.current = null; } catch {}
     hasFinished.current = false;
+    hasStarted.current  = false;
     setAudioWait(false);
     setAudioLabel("");
     setIsRunning(false);
@@ -297,6 +297,7 @@ export default function TimerButton({
     try { finishRef.current?.pause();  finishRef.current  = null; } catch {}
     try { instantRef.current?.pause(); instantRef.current = null; } catch {}
     hasFinished.current = false;
+    hasStarted.current  = false;
     setAudioWait(false);
     setAudioLabel("");
     setIsRunning(false);
@@ -317,6 +318,7 @@ export default function TimerButton({
     try { finishRef.current?.pause();  finishRef.current  = null; } catch {}
     try { instantRef.current?.pause(); instantRef.current = null; } catch {}
     hasFinished.current = false;
+    hasStarted.current  = false;
     setAudioWait(false);
     setAudioLabel("");
     setIsRunning(false);

@@ -975,6 +975,24 @@ export default function Themes({ setSoundMap, onThemesChange }) {
     const relinked = themes.map(relinkTheme);
     if (changed) {
       setThemes(relinked);
+      // Re-activate the current theme so soundMap uses the newly linked URLs
+      if (activeId) {
+        const activeTheme = relinked.find(t => t.id === activeId);
+        if (activeTheme) {
+          if (activeSubId) {
+            const activeSub = (activeTheme.subThemes || []).find(s => s.id === activeSubId);
+            if (activeSub) {
+              const resolved = resolveStageMap(activeSub, activeTheme);
+              const resolvedWildcard = activeSub.wildcardInherit
+                ? (activeTheme.wildcardClips || [])
+                : (activeSub.wildcardClips || []);
+              setSoundMap(stageMapToSoundMap(resolved, resolvedWildcard));
+            }
+          } else {
+            setSoundMap(stageMapToSoundMap(activeTheme.stageMap, activeTheme.wildcardClips || []));
+          }
+        }
+      }
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
